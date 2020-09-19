@@ -1,0 +1,130 @@
+// Updated code: 09_14_2019
+
+// Replaced the mesh with a mesh symmetric about 0
+real r0=-10.0,r1=10.0;
+real s0=0,s1=1;
+int n=999,m=1;
+
+//// mesh declaration
+mesh Th=square(n,m,[r0+(r1-r0)*x,s0+(s1-s0)*y]);
+//fespace Vh(Th,[P1,P1]);
+//Vh [uu,vv], [w,s];
+plot (Th, wait=true,ps="LJJ_Mesh.jpg");
+
+
+// The quadratic Lagrangian elements to solve the DSG
+fespace Vh(Th,P2);
+
+// The space for the output
+fespace Wh(Th,P1);
+// More precisely, the numerical solution is projected onto the P1 space 
+// to get the nodal data on the unstructured mesh
+
+// We print also some general information about the mesh:
+Vh hh = hTriangle;
+cout << endl << "Max element size = " << hh[].max << endl;
+cout << "Min element size = " << hh[].min << endl;
+cout << "Average element size = " << 0.5*(hh[].min + hh[].max) << endl << endl;
+
+savemesh(Th,"LJJ.msh");
+
+  
+// Time discretization parameters
+real Tf = 30.0; // Final simulation time
+int M = 4000;  // Number of steps
+int Nwrite = 10; // write the results every Nw time steps
+real dt = Tf/M; // time step
+real dt2 = dt*dt; // dt^2
+
+// Let us print the time step size:
+cout << "Time step = " << dt << endl;
+
+
+// inital conditions
+//real L = 0.251; // the length of the LJJ
+real u0 = 0.0; //the first kink's initial speed
+real z = 1.00;
+real x01 = -0.5;//the kink's initial position
+real x02 = -3.5;
+real xp= 0.0; // The position of the microresistance
+real yp= 0.0; // The position of the microresistance
+real sq = sqrt(1.0-u0*u0); // inverse of the Lorentz factor
+real J = 1.15; // The Josephson Coefficient
+//real a=sqrt((J-1)/(J+1));
+//real b= sqrt((J*J-1)/(4*J));
+real f=  0.03; // Bias Current
+real ep= 0.85; // Micro-Resistance
+real alpha = 0.005 ;
+
+// initialized first two time steps
+Vh phi0 = z*4.0*atan(exp((x-x01)/sq)) + (1.0-z)*4.0*atan(exp((x-x02)/sq)); // kink shape at t=0
+Vh phi1 = z*4.0*atan(exp((x-x01-u0*dt)/sq))+(1.0-z)*4.0*atan(exp((x-x02-u0*dt)/sq)); // kink shape at t=dt
+Vh delta= 1.0*(1.0/(2*sqrt(alpha)*sqrt(pi))^2)*exp((-(x-xp)^2-(y-yp)^2)/(4*alpha)); // alpha = 0.005
+
+real E0 = 8.0/sq; //rest mass for the single fluxon is 8 so the energy is too
+
+//// We save the initial condition:
+Wh phiW; // projection variable belonging to the P1 space
+{
+    phiW = phi0;
+    ofstream file("Solution0_DSG_09172020.txt");
+    file << phiW[].n << " 2\n";
+    for (int k=0; k < phiW[].n ; k++)
+      file << k << phiW[][k] << endl;
+}
+
+// Weak formulation
+Vh phi, psi;
+Vh phiml;
+Vh dphi = dx(phi);
+
+int op = 1;
+
+problem DSG(phi,psi,init=op,solver=CG) = int2d(Th)(phi*psi + 0.5*dt2*(dx(phi)*dx(psi) + dy(phi)*dy(psi))) + int2d(Th)(0.5*dt2*(dx(phi0)*dx(psi) + dy(phi0)*dy(psi))) + int2d(Th)(((phi0 - 2.0*phi1) + dt2*sin(phi1) + dt2*(0.5*J)*sin(2.0*phi1)+ dt2*f - ep*delta*dt2*sin(phi1))*psi);
+
+// To compute the energy
+real ET,EH,EN;
+
+// ET: Total Energy
+// EH: Homogenous Energy
+// EN: Perturbation Energy
+// We save also the energy evolution in all the branches:
+ofstream filE("EnergyCons.txt");
+
+// solving the DSG
+// The main loop in time:
+for (int j=1; j<=M; j++)
+{
+  DSG; 
+op = 1;
+
+phiml = phi0;
+phi0 = phi1;
+phi1 = phi;
+
+	if (j % Nwrite == 0) // if the time to output the result has come:  
+   {
+	// Let us compute the energies:	
+	EH = int2d(Th)(0.5*square((phi1-phiml)/(2*dt)) + 0.5*(square(dx(phi0)) + square(dy(phi0))) + 1 - cos(phi0)+0.5*(1-cos(2*phi0)));
+
+	EN = int2d(Th)(f*phi0-ep*delta*(1-cos(phi0)));
+
+	ET = EH +EN ;
+
+	{// save the current solution for the post-processing later:
+      phiW = phi;
+      ofstream file("Solution_DSG_" + j + ".txt");
+      file << "Phi_n = "+phiW[].n << "\n";
+	  file << "k" << "Phi(k)" << "\n";
+      for (int k=0; k < phiW[].n ; k++)
+        file << k << phiW[][k] << endl; 
+	}
+	  // Display the current time and the total energy for the check:
+    cout << "Time = " << dt*j << "; Energy total  = " << ET << endl;
+    // save the energy data into the file:
+    filE << dt*j << "\t" << EH << "\t" << EN << "\t" << ET << endl;
+
+  
+plot(phi,fill=true,dim=3,cmm="Double Sine-Gordon with Bias Current and Pinning",ColorScheme=1); 
+	}
+}
